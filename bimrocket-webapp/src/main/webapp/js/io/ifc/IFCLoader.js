@@ -2335,37 +2335,167 @@ class IfcTrimmedCurveHelper extends IfcCurveHelper
   {
     if (this.points === null)
     {
+      
       const curve = this.entity;
       const schema = curve.constructor.schema;
 
-      const basisCurve = curve.BasisCurve;
-      const basisHelper = this.helper(basisCurve);
+      //const basisCurve = curve.BasisCurve;
+      //const basisHelper = this.helper(curve);
       const trim1 = curve.Trim1[0];
       const trim2 = curve.Trim2[0];
-      if (basisCurve instanceof schema.IfcConic)
-      {
-        let startAngle = (trim1 instanceof schema.IfcParameterValue) ?
+      //if (basisCurve instanceof schema.IfcConic)
+     // {
+        let param1 = (trim1 instanceof schema.IfcParameterValue) ?
           trim1.Value : trim1;
 
-        let endAngle = (trim2 instanceof schema.IfcParameterValue) ?
+        let param2 = (trim2 instanceof schema.IfcParameterValue) ?
           trim2.Value : trim2;
 
         let sense = curve.SenseAgreement === true;
         this.points =
-          basisHelper.getTrimmedPoints(startAngle, endAngle, sense);
-      }
-      else if (basisCurve instanceof schema.IfcLine)
-      {
-        this.points = basisHelper.getPoints();
+          this.getTrimmedPoints(param1, param2, sense);
+
+        //console.log(this.points);
+      //}
+      //else if (basisCurve instanceof schema.IfcLine)
+     // {
+       // this.points = basisHelper.getPoints();
+
+       // console.log(this.points);
         //console.warn("unsupported trimmming of IfcLine", curve);
-      }
-      else
-      {
+      //}else{
         //console.warn("unsupported trimmed curve segment", curve);
-      }
+     // }
     }
     return this.points;
   }
+
+  getTrimmedPoints(param1, param2, sense)
+  {
+    const curve = this.entity;
+    const basisCurve = curve.BasisCurve;
+    let points = [];
+    
+    const schema = curve.constructor.schema;
+
+    const loader = this.loader;
+
+    let isCartesianPoint = param1 instanceof schema.IfcCartesianPoint
+            && param2 instanceof schema.IfcCartesianPoint;
+
+    // invert orientation because is defined by 3d position not by parameters
+    if(isCartesianPoint === true){
+        sense = !sense;
+    }
+
+
+    const trim_start = this.helper(param1).getPoint();
+    const trim_end = this.helper(param2).getPoint();
+    const basis_curve_type = basisCurve.constructor.name;
+
+        switch(basis_curve_type){
+        case "IfcLine":{
+
+          if(
+            isCartesianPoint === true
+          ){          
+            if(  trim_start instanceof THREE.Vector3
+              && trim_end instanceof THREE.Vector3
+            ){
+              if(sense == true){ // anti clock-wise
+                  points = [trim_start,trim_end]
+              }else{ // clock-wise
+                  points = [trim_end,trim_start]
+              }
+              /*let tmp_points = this.helper(basisCurve).getPoints();
+            
+              if(sense == true){ // anti clock-wise
+                  points = [tmp_points[0],tmp_points[1]]
+              }else{ // clock-wise
+                  points = [tmp_points[1],tmp_points[0]]
+              } */  
+            }else  if(  trim_start instanceof THREE.Vector2
+              && trim_end instanceof THREE.Vector2
+            ){
+                console.error("IfcTrimmedCurve - IfcLine Point2d - Not implemented")
+            }else{
+              console.error("IfcTrimmedCurve - IfcLine Point dimension not implemented")
+            }
+          }else{
+            console.error("IfcTrimmedCurve - IfcLine Angle not supported")
+          }
+        }
+        break;
+        case "IfcCircle":
+        {     
+           const circle = basisCurve;
+           const matrix = this.helper(circle.Position).getMatrix();
+          const radius = circle.Radius;
+          let startAngle;
+          let endAngle;
+
+         if(
+            isCartesianPoint === true
+          ){   
+            if(  trim_start instanceof THREE.Vector3
+              && trim_end instanceof THREE.Vector3
+            ){
+
+              const vecX = new THREE.Vector3();
+              const vecY = new THREE.Vector3();
+              const vecZ = new THREE.Vector3();
+              const position = new THREE.Vector3();
+
+              matrix.extractBasis(vecX,vecY,vecZ);
+              position.setFromMatrixPosition(matrix);
+
+              const v1 = trim_start.clone().sub(position);
+              const v2 = trim_end.clone().sub(position);
+
+              const dxS = vecX.x * v1.x + vecX.y * v1.y + vecX.z * v1.z;
+              const dyS = vecY.x * v1.x + vecY.y * v1.y + vecY.z * v1.z;
+
+              const dxE = vecX.x * v2.x + vecX.y * v2.y + vecX.z * v2.z;
+              const dyE = vecY.x * v2.x + vecY.y * v2.y + vecY.z * v2.z;
+
+              startAngle = (new THREE.Vector2(dxE,dyE)).angle();
+              endAngle = (new THREE.Vector2(dxS,dyS)).angle();
+            }else  if(  trim_start instanceof THREE.Vector2
+              && trim_end instanceof THREE.Vector2
+            ){
+                console.error("IfcTrimmedCurve - IfcCircle Point2d - Not implemented")
+            }else{
+              console.error("IfcTrimmedCurve - IfcCircle Point dimension not implemented")
+            }
+          }else{
+              startAngle = THREE.MathUtils.degToRad(param1);
+              endAngle = THREE.MathUtils.degToRad(param2);
+          }
+
+          const segments = loader.getCircleSegments(radius);
+
+          const addPoint = angle =>
+          {
+            let point = new THREE.Vector3();
+            point.x = Math.cos(angle) * radius;
+            point.y = Math.sin(angle) * radius;
+            point.z = 0;
+            point.applyMatrix4(matrix);
+            points.push(point);
+          };
+
+            const circle_helper = this.helper(circle);
+
+            circle_helper.generatePoints(startAngle, endAngle, sense, segments, addPoint);
+        }
+        break;
+      default:
+        console.error(`IfcTrimmedCurve - ${basis_curve_type} not implemented`)
+      }
+    return points;
+  }  
+
+
 };
 registerIfcHelperClass(IfcTrimmedCurveHelper);
 
@@ -2438,40 +2568,27 @@ class IfcConicHelper extends IfcCurveHelper
 
   generatePoints(startAngle, endAngle, sense, segments, addPoint)
   {
-    let angle;
-    if (sense) // anti-clockwise
+    
+    if (sense === true) // anti-clockwise
     {
       if (endAngle < startAngle) endAngle += 2 * Math.PI;
-      let dif = endAngle - startAngle;
-      let divs = Math.ceil(dif * segments / (2 * Math.PI));
-      let angleStep = dif / divs;
-
-      angle = startAngle;
-      while (divs > 0)
-      {
-        addPoint(angle);
-        angle += angleStep;
-        divs--;
-      }
-      addPoint(endAngle);
+    }else{ // clockwise
+      if (startAngle <= endAngle) startAngle += 2 * Math.PI;
     }
-    else // clockwise
+
+    let lengthAngle = endAngle - startAngle;
+    let angleStep = lengthAngle/(segments);
+
+    let angle = startAngle;
+    for (let i=0; i < segments;i++)
     {
-      if (endAngle > startAngle) startAngle += 2 * Math.PI;
-
-      let dif = startAngle - endAngle;
-      let divs = Math.ceil(dif * segments / (2 * Math.PI));
-      let angleStep = dif / divs;
-
-      angle = startAngle;
-      while (divs > 0)
-      {
-        addPoint(angle);
-        angle -= angleStep;
-        divs--;
-      }
-      addPoint(endAngle);
+      addPoint(angle);
+      angle+=angleStep;
     }
+
+    // add last point
+    addPoint(endAngle);      
+
   }
 };
 registerIfcHelperClass(IfcConicHelper);
@@ -2508,33 +2625,6 @@ class IfcCircleHelper extends IfcConicHelper
       }
     }
     return this.points;
-  }
-
-  getTrimmedPoints(param1, param2, sense)
-  {
-    let points = [];
-    const circle = this.entity;
-    const loader = this.loader;
-
-    const matrix = this.helper(circle.Position).getMatrix();
-    const radius = circle.Radius;
-    const startAngle = THREE.MathUtils.degToRad(param1);
-    const endAngle = THREE.MathUtils.degToRad(param2);
-    const segments = loader.getCircleSegments(radius);
-
-    const addPoint = angle =>
-    {
-      let point = new THREE.Vector3();
-      point.x = Math.cos(angle) * radius;
-      point.y = Math.sin(angle) * radius;
-      point.z = 0;
-      point.applyMatrix4(matrix);
-      points.push(point);
-    };
-
-    this.generatePoints(startAngle, endAngle, sense, segments, addPoint);
-
-    return points;
   }
 };
 registerIfcHelperClass(IfcCircleHelper);
@@ -2695,11 +2785,23 @@ class IfcFaceHelper extends IfcHelper
 
     if (faceVertices && faceVertices.length >= 3)
     {
-      let face = solidGeometry.addFace(...faceVertices);
+      let solidFace;
+      if(face.FaceSurface instanceof schema.IfcCylindricalSurface){
+        // TODO: Instead of single cylindrical face, generate as many faces as quads cylindrical generates
+        solidFace = solidGeometry.addCylindricalFace(
+          this.helper(face.FaceSurface.Position).getMatrix()
+          ,face.FaceSurface.Radius
+          ,this.loader.getCircleSegments(face.FaceSurface.Radius)
+          ,...faceVertices
+        );
+      }else{
+        solidFace = solidGeometry.addFace(...faceVertices);
+      }
+
       for (let holeVertices of holes)
       {
         if (holeVertices.length >= 3)
-        face.addHole(...holeVertices);
+        solidFace.addHole(...holeVertices);
       }
     }
   }
@@ -2820,16 +2922,26 @@ class IfcOrientedEdgeHelper extends IfcEdgeHelper
     if (this.points === null)
     {
       const edge = this.entity;
+      const schema = edge.constructor.schema;
 
       this.points = this.helper(edge.EdgeElement).getPoints();
 
       if (this.points.length > 0)
       {
-        if (edge.Orientation === false)
-        {
-          this.points = [...this.points];
-          this.points.reverse();
-        }
+
+          // custom case whether schema is ifc conic
+          if(edge.EdgeGeometry instanceof schema.IfcConic){
+
+            if (edge.Orientation === true)
+            {
+              this.points = this.points.reverse();
+            }
+          }else{
+            if (edge.Orientation === false){
+              this.points = this.points.reverse();
+            }
+          }
+        
       }
     }
     return this.points;

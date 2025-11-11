@@ -351,6 +351,144 @@ class GeometryUtils
     return THREE.ShapeUtils.triangulateShape(projectedVertices, projectedHoles);
   }
 
+    /* generate points/triangulate 3D cylindrical face */
+  static buildCylindricalSurface(transform, startDeg, endDeg, minZ, maxZ, radius, circleSegments) {
+
+    const xDir = GeometryUtils._vector1;
+    const yDir = GeometryUtils._vector2;
+    const zDir = GeometryUtils._vector3;
+    const center = GeometryUtils._vector4;
+
+    center.setFromMatrixPosition(transform);
+
+    transform.extractBasis(xDir, yDir, zDir);
+    xDir.normalize(); yDir.normalize(); zDir.normalize();
+
+    const startRad = THREE.MathUtils.degToRad(startDeg);
+    const endRad = THREE.MathUtils.degToRad(endDeg);
+    const radStep = (endRad - startRad) / (circleSegments - 1);
+    const zStep = (maxZ - minZ) / (circleSegments - 1);
+
+    const rings = [];
+    const p = new THREE.Vector3();
+    for (let r = 0; r < circleSegments; r++) {
+      const angle = startRad + r * radStep;
+      const sinA = Math.sin(angle);
+      const cosA = Math.cos(angle);
+
+      const ring = [];
+      for (let j = 0; j < circleSegments; j++) {
+        const z = minZ + j * zStep;
+        p.set(0,0,0);
+        p.addScaledVector(xDir, sinA * radius)
+          .addScaledVector(yDir, cosA * radius)
+          .addScaledVector(zDir, z)
+          .add(center);
+        ring.push([p.x,p.y,p.z]);
+      }
+      rings.push(ring);
+    }
+
+    // triangulate between rings
+    const points = [];
+    const indices = [];
+    //const triangles = [];
+    let indice_offset = 0;
+    for (let r = 0; r < circleSegments - 1; r++) {
+      const r1 = r + 1;
+      for (let j = 0; j < circleSegments - 1; j++) {
+
+        // segmented plane
+        const vertices = [
+          rings[r][j]      // 00
+          ,rings[r][j + 1] // 01
+          ,rings[r1][j]    // 10
+          ,rings[r1][j + 1]// 11
+        ];
+
+        for(let p=0; p < vertices.length; p++){
+          points.push(new THREE.Vector3(vertices[p][0],vertices[p][1],vertices[p][2]));
+        }
+
+        // indices
+
+        // 1st triangle
+        indices.push(indice_offset  + 0);
+        indices.push(indice_offset  + 1);
+        indices.push(indice_offset  + 2);
+
+        // 2nd triangle
+        indices.push(indice_offset  + 2);
+        indices.push(indice_offset  + 1);
+        indices.push(indice_offset  + 3);
+
+        // next vertex indice
+        indice_offset+=vertices.length;
+      }
+    }
+
+    return [points,indices];
+  }
+
+
+  /* triangulate a 3D cylindrical face */
+  static triangulateCylindricalFace(vertices, holes, transform,radius,circleSegments)
+  {
+
+    const xDir = GeometryUtils._vector1;
+    const yDir = GeometryUtils._vector2;
+    const zDir = GeometryUtils._vector3;
+    const center = GeometryUtils._vector4;
+
+    transform.extractBasis(xDir,yDir,zDir);
+
+    xDir.normalize();   // cylinder axis (local Z)
+    yDir.normalize();   // reference direction (Î¸ = 0)
+    zDir.normalize();   // perpendicular direction
+
+    center.setFromMatrixPosition(transform);
+
+
+    let minZ = Infinity, maxZ = -Infinity;
+    const angleVec = [];
+
+    const rel_tmp = new THREE.Vector3();
+
+    for (const v of vertices) {
+      rel_tmp.set(v.x,v.y,v.z);
+      rel_tmp.subVectors(v, center);
+      const dz = rel_tmp.dot(zDir);
+      const dx = rel_tmp.dot(xDir);
+      const dy = rel_tmp.dot(yDir);
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI - 90;
+      angleVec.push(angle);
+      if (dz < minZ) minZ = dz;
+      if (dz > maxZ) maxZ = dz;
+    }
+
+    // unwrap angles to avoid jumps >180 degrees
+    const unwrapped = [angleVec[0]];
+    for (let i = 1; i < angleVec.length; i++) {
+      let diff = angleVec[i] - angleVec[i - 1];
+      if (diff > 180) diff -= 360;
+      else if (diff < -180) diff += 360;
+      unwrapped.push(unwrapped[i - 1] + diff);
+    }
+
+    let normalizeAngle = (angle) => ((angle % 360) + 360) % 360;
+    
+
+    let startDeg = normalizeAngle(Math.min(...unwrapped));
+    let endDeg   = normalizeAngle(Math.max(...unwrapped));
+
+    let span = endDeg - startDeg;
+    if (span < 0) span += 360;
+
+    endDeg = startDeg + span;
+
+    return GeometryUtils.buildCylindricalSurface(transform, startDeg, endDeg, minZ, maxZ, radius, circleSegments);
+  }
+
   static intersectLinePlane(v1, v2, plane)
   {
     let v21 = v2.clone().sub(v1);
