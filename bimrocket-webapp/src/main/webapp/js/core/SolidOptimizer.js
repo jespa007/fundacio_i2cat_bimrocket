@@ -5,7 +5,7 @@
  */
 
 import * as THREE from "three";
-import { SolidGeometry,CylindricalFace } from "../core/SolidGeometry.js";
+import { SolidGeometry } from "../core/SolidGeometry.js";
 import { GeometryUtils } from "../utils/GeometryUtils.js";
 
 class SolidOptimizer
@@ -56,13 +56,6 @@ class SolidOptimizer
     for (let f = 0; f < faces.length; f++)
     {
       let face = faces[f];
-
-      // TODO: Manage optimize for Cylindrical Faces
-      if(face instanceof CylindricalFace){
-        let polygon = new Polygon(f, face);
-        polygons.add(polygon);
-        continue;
-      }      
 
       if (face.getArea() < this.minFaceArea) continue; // discard small faces
 
@@ -373,84 +366,79 @@ class SolidOptimizer
     const segments = new Map();
     let rings = [];
 
-    if(polygon.normal){ 
-      // Only optimizes faces if polygon normal is defined
-      // TODO: Manage normal for CylindricalFaces
-
-      // create segments Map: segments.get(v) => [v_adj1, v_adj2]
-      for (let edge of polygon.edges)
+    // create segments Map: segments.get(v) => [v_adj1, v_adj2]
+    for (let edge of polygon.edges)
+    {
+      if (edge.polygon2 === null ||
+          edge.polygon1 !== edge.polygon2)
       {
-        if (edge.polygon2 === null ||
-            edge.polygon1 !== edge.polygon2)
+        let v1 = edge.v1;
+        let v2 = edge.v2;
+
+        let next1 = segments.get(v1);
+        if (next1 === undefined)
         {
-          let v1 = edge.v1;
-          let v2 = edge.v2;
-
-          let next1 = segments.get(v1);
-          if (next1 === undefined)
-          {
-            next1 = [];
-            segments.set(v1, next1);
-          }
-          next1.push(v2);
-
-          let next2 = segments.get(v2);
-          if (next2 === undefined)
-          {
-            next2 = [];
-            segments.set(v2, next2);
-          }
-          next2.push(v1);
+          next1 = [];
+          segments.set(v1, next1);
         }
-        else edgeMap.delete(edge.key);
+        next1.push(v2);
+
+        let next2 = segments.get(v2);
+        if (next2 === undefined)
+        {
+          next2 = [];
+          segments.set(v2, next2);
+        }
+        next2.push(v1);
       }
+      else edgeMap.delete(edge.key);
+    }
 
-      // find rings
-      while (segments.size > 0)
+    // find rings
+    while (segments.size > 0)
+    {
+      let ring = [];
+
+      let v0 = segments.keys().next().value;
+      let v1 = null;
+      let v2 = v0;
+      let next = undefined;
+
+      do
       {
-        let ring = [];
+        let vertex = vertexMap.get(v2);
 
-        let v0 = segments.keys().next().value;
-        let v1 = null;
-        let v2 = v0;
-        let next = undefined;
-
-        do
+        if (vertex && (vertex.polygons.size >= 3 || vertex.onBorder))
         {
-          let vertex = vertexMap.get(v2);
-
-          if (vertex && (vertex.polygons.size >= 3 || vertex.onBorder))
+          if (vertex.newIndex === undefined)
           {
-            if (vertex.newIndex === undefined)
-            {
-              vertex.newIndex = vertices.length;
-              vertices.push(vertex.position);
-            }
-            ring.push(vertex.newIndex);
+            vertex.newIndex = vertices.length;
+            vertices.push(vertex.position);
           }
+          ring.push(vertex.newIndex);
+        }
 
-          next = segments.get(v2);
-          if (next)
-          {
-            segments.delete(v2);
-            let vn = next[0] === v1 ? next[1] : next[0];
-            v1 = v2;
-            v2 = vn;
-          }
+        next = segments.get(v2);
+        if (next)
+        {
+          segments.delete(v2);
+          let vn = next[0] === v1 ? next[1] : next[0];
+          v1 = v2;
+          v2 = vn;
         }
-        while (next !== undefined && v2 !== v0);
+      }
+      while (next !== undefined && v2 !== v0);
 
-        if (next === undefined || ring.length < 3)
-        {
-          // invalid ring
-          rings  = [];
-          break;
-        }
-        else
-        {
-          // have a valid ring
-          rings.push(ring);
-        }
+      if (next === undefined || ring.length < 3)
+      {
+        // invalid ring
+        rings  = [];
+        break;
+      }
+      else
+      {
+        // have a valid ring
+        rings.push(ring);
       }
     }
 
@@ -495,12 +483,7 @@ class SolidOptimizer
       for (let originalFace of polygon.faces)
       {
         let points = originalFace.indices.map(v => inputVertices[v]);
-        let face;
-        if(originalFace instanceof CylindricalFace){
-          face = outputGeometry.addCylindricalFace(originalFace.transformMatrix, originalFace.radius,originalFace.circleSegments, ...originalFace.outerVertices);
-        }else{
-          face = outputGeometry.addFace(...points);
-        }
+        let face = outputGeometry.addFace(...points);
         face.normal = polygon.normal;
 
         for (let hole of face.holes)
@@ -630,13 +613,7 @@ class Polygon
   constructor(id, face)
   {
     this.id = id;
-    this.normal = null;
-
-    // TODO : Manage normal for Cylindral Faces
-    if(face.normal){
-      this.normal = face.normal.clone();
-    }
-
+    this.normal = face.normal.clone();
     this.faces = [face];
     this.edges = [];
   }

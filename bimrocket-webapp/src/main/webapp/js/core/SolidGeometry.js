@@ -25,42 +25,20 @@ class SolidGeometry extends THREE.BufferGeometry
     {
       throw "Invalid face: " + vertices.length + " vertices";
     }
-    
-    const face = new Face(this, vertices);
-    this.faces.push(face);
 
+    const face = new Face(this);
+    const outerLoop = face.outerLoop;
+    for (let v of vertices)
+    {
+      outerLoop._addVertex(v);
+    }
+    face.updateNormal();
+    this.faces.push(face);
     this.boundingBox = null;
     this.boundingSphere = null;
 
     return face;
   }
-
-  addCylindricalFace(
-    transformMatrix
-    ,radius
-    ,circleSegments
-    ,...outerVertices
-  )
-  {
-    if (outerVertices.length < 3)
-    {
-      throw "Invalid face: " + outerVertices.length + " vertices";
-    }
-
-    const face = new CylindricalFace(
-      this
-      ,outerVertices
-      ,transformMatrix
-      ,radius
-      ,circleSegments
-    );
-
-    this.faces.push(face);
-    this.boundingBox = null;
-    this.boundingSphere = null;
-
-    return face;
-  }  
 
   updateFaceNormals()
   {
@@ -361,23 +339,13 @@ class SolidGeometry extends THREE.BufferGeometry
 
 class Face
 {
-  constructor(geometry,outerVertices) // SolidGeometry
+  constructor(geometry) // SolidGeometry
   {
     this.geometry = geometry;
     this.outerLoop = new Loop(this);
     this.holes = []; // array of Loop
     this.normal = null;
     this.triangles = null;
-    this.indices = [];
-
-    if(outerVertices !== undefined){
-      const outerLoop = this.outerLoop;
-      for (let v of outerVertices)
-      {
-        outerLoop._addVertex(v);
-      }
-      this.updateNormal();    
-    }    
   }
 
   getVertex(pos)
@@ -550,98 +518,6 @@ class Face
   }
 }
 
-class CylindricalFace extends Face
-{
-  constructor(
-    geometry
-    ,outerVertices 
-    ,transformMatrix
-    ,radius
-    ,circleSegments = 12
-  ){
-
-    super(
-      geometry
-      //,outerVertices // --> TODO: Right now do not pass outerVertices geometry, because cylindrical face generates internal faces
-    );
- 
-    
-    this.transformMatrix = transformMatrix;
-    this.radius = radius;
-    this.circleSegments = circleSegments;
-    this.outerVertices = outerVertices
-
-    // build triangles and points
-    this._indices = [];
-    this._vertices = [];
-    this.triangles = [];
-
-    let indices = [];
-
-    [this._vertices, indices] = GeometryUtils.triangulateCylindricalFace(
-      outerVertices
-      ,[]//, innerVertices (holes). Not handled right now
-      ,this.transformMatrix
-      ,this.radius
-      ,this.circleSegments
-    );
-
-    // update geometry indices/vertices
-    let vertexCount =  this.geometry.vertices.length;
-
-    for(let i=0; i < indices.length; i+=3){ // +=3 triangle
-      let i0=indices[i+0], i1=indices[i+1], i2=indices[i+2];
-
-      // indices face
-      this._indices.push(i0);
-      this._indices.push(i1);
-      this._indices.push(i2);
-      
-      // triangles indices of global geometry
-      this.triangles.push([
-        i0+vertexCount
-        ,i1+vertexCount
-        ,i2+vertexCount
-      ]);
-    }
-
-    for(let i in this._vertices){
-      this.geometry.vertices.push(this._vertices[i]);
-    }
-    
-  }
-
-  getVertex(pos)
-  {
-    return this._vertices[this._indices[pos]];
-  }
-
-  getVertexCount()
-  {
-    return this._indices.length;
-  }
-
-  getVertices()
-  {
-    return this._vertices;
-  } 
-
-  get indices()
-  {
-    return this._indices;
-  }
-
-  set indices(indices)
-  {
-    this._indices = indices;
-  }
-
-  updateTriangles()
-  {
-      // does nothing
-  }  
-}
-
 /* Loop */
 
 class Loop
@@ -710,5 +586,5 @@ class Loop
   }
 }
 
-export { SolidGeometry, CylindricalFace, Face, Loop };
+export { SolidGeometry, Face, Loop };
 
