@@ -5,8 +5,6 @@
  */
 
 import * as THREE from "three";
-import earcut from  "earcut";
-
 
 class GeometryUtils
 {
@@ -467,7 +465,7 @@ static buildSurfaceOfRevolutionWithoutTrimming(transform,boundVertices, boundInd
     return [vertices,triangles];
   }
  
-/*  buildSurfaceOfRevolution 0.4.5
+/*  buildSurfaceOfRevolution
  *  - Parametrization: (u = angle, v = arc-length along profile)
  *  - profile3d and boundVertices are in WORLD coordinates
  *  - `transform` is the local frame of the surface-of-revolution
@@ -477,12 +475,12 @@ static buildSurfaceOfRevolutionWithoutTrimming(transform,boundVertices, boundInd
  *  - Trims in UV space using martinez + earcut, EXCEPT when the
  *    boundary polygon corresponds to an untrimmed surface:
  *      * full param rectangle (dome, full revolution), or
- *      * only two loops at v≈0 and v≈1 (partial-span, like half cylinder).
+ *      * only two loops at v close to 0 and v close to 1 (partial-span, like half cylinder).
  */
 static buildSurfaceOfRevolution(
     transform,      // THREE.Matrix4
     boundVertices,  // THREE.Vector3[]
-    boundIndices,   // (not used yet – single loop assumed)
+    boundIndices,   // (not used yet - single loop assumed)
     profile3d,      // THREE.Vector3[]
     startDeg,
     endDeg,
@@ -646,7 +644,7 @@ static buildSurfaceOfRevolution(
       const dz = local.z;
       const v  = projectToProfile(dd, dz);
 
-      // unwrap by adding or subtracting 2π until difference is small
+      // unwrap by adding or subtracting 2pi until difference is small
       if(i > 0){
         let prevU = boundaryRingUV[i - 1][0];
         while (u - prevU > Math.PI)  u -= 2 * Math.PI;
@@ -669,7 +667,7 @@ static buildSurfaceOfRevolution(
         if (u > maxU) maxU = u;
     }
 
-    // Case: loop is entirely left of domain → shift forward
+    // Case: loop is entirely left of domain -> shift forward
     while (maxU < startRad) {
         for (let i = 0; i < boundaryRingUV.length; i++)
             boundaryRingUV[i][0] += 2 * Math.PI;
@@ -678,7 +676,7 @@ static buildSurfaceOfRevolution(
         maxU += 2 * Math.PI;
     }
 
-    // Case: loop is entirely right of domain → shift backward
+    // Case: loop is entirely right of domain -> shift backward
     while (minU > endRad) {
         for (let i = 0; i < boundaryRingUV.length; i++)
             boundaryRingUV[i][0] -= 2 * Math.PI;
@@ -709,7 +707,7 @@ static buildSurfaceOfRevolution(
     // Relaxed area threshold
     const UNTRIMMED_AREA_THRESHOLD = 0.20; // 20%
 
-    // ---- 1) "top & bottom only" detection (from 0.4.2) ----------------
+    // ---- 1) "top & bottom only" detection ----------------
     const EPS_V = 1e-3;
     let vMin =  Infinity;
     let vMax = -Infinity;
@@ -729,7 +727,7 @@ static buildSurfaceOfRevolution(
 
     const isTopBottomOnlyUntrim = hasBottom && hasTop && noInteriorV;
 
-    // ---- 2) NEW: "rectangle-like border" detection ---------------------
+    // ---- 2) "rectangle-like border" detection ---------------------
     const spanAbs = Math.abs(span);
     const EPS_U   = spanAbs * 0.1; // 10% of angle span as tolerance
     const EDGE_V_TOL = 0.1;       // 10% in v
@@ -769,30 +767,30 @@ static buildSurfaceOfRevolution(
     // ---- 3) Full-rectangle area-based detection (from 0.4.1) ----------
     const isFullRectUntrimmed = (areaDiffRel < UNTRIMMED_AREA_THRESHOLD);
 
-    // ---- 4) Final decision --------------------------------------------
+    // ---- 4) Check untrimmed --------------------------------------------
     const isUntrimmed =
-        isTopBottomOnlyUntrim ||     // v≈0 & v≈1 only (previous half-cylinder)
+        isTopBottomOnlyUntrim ||     // v close to 0 & v close to 1 only (previous half-cylinder)
         isRectLikeBorder      ||     // NEW: full rectangle border, no interior points
-        isFullRectUntrimmed;         // area ≈ span*1 (dome & friends)
+        isFullRectUntrimmed;         // area close to span*1 (dome & friends)
 
     if (isUntrimmed) {
         // Treat as untrimmed: directly triangulate the grid.
         const vertices  = gridXYZ.slice();
         const triangles = [];
+        const faces = [];
 
         for (let r = 0; r < circleSegments - 1; r++) {
             for (let i = 0; i < ringSize - 1; i++) {
-                const a = idx(r,     i);
-                const b = idx(r,     i + 1);
-                const c = idx(r + 1, i);
-                const d = idx(r + 1, i + 1);
+              const v00 = gridXYZ[idx(r,     i)];
+              const v10 = gridXYZ[idx(r,     i + 1)];
+              const v01 = gridXYZ[idx(r + 1, i)];
+              const v11 = gridXYZ[idx(r + 1, i + 1)];
 
-                triangles.push([a, b, c]);
-                triangles.push([c, b, d]);
+              faces.push([ v00, v10, v11, v01 ]);
             }
         }
 
-        return [vertices, triangles];
+        return faces;
     }
 
 
@@ -849,7 +847,7 @@ static buildSurfaceOfRevolution(
             index += h.length;
         }
 
-        return earcut(coords, holeIndices);
+        return THREE.earcut(coords, holeIndices);
     };
 
     const uvToXYZ = (P, Auv, Buv, Cuv, Axyz, Bxyz, Cxyz) => {
@@ -886,8 +884,7 @@ static buildSurfaceOfRevolution(
             P2[0] * (P0[1] - P1[1])
         ) * 0.5;
 
-    const vertices  = [];
-    const triangles = [];
+    const faces = [];
 
     const clipTriangle = (i0, i1, i2) => {
         const Auv  = gridUV[i0], Axyz = gridXYZ[i0];
@@ -940,9 +937,10 @@ static buildSurfaceOfRevolution(
                 const vB = uvToXYZ(Pb, Auv, Buv, Cuv, Axyz, Bxyz, Cxyz);
                 const vC = uvToXYZ(Pc, Auv, Buv, Cuv, Axyz, Bxyz, Cxyz);
 
-                const base = vertices.length;
-                vertices.push(vA, vB, vC);
-                triangles.push([base, base + 1, base + 2]);
+                //const base = vertices.length;
+                //vertices.push(vA, vB, vC);
+                //triangles.push([base, base + 1, base + 2]);
+                faces.push([ vA, vB, vC ]);
             }
         }
     };
@@ -959,13 +957,13 @@ static buildSurfaceOfRevolution(
         }
     }
 
-    return [vertices, triangles];
+    return faces;
 }
 
 
 
   /*  triangulate a 3D revolution face */
-  static triangulateSurfaceOfRevolution(transform, boundVertices, boundIndices, profile3d, circleSegments=12) {
+  static triangulateSurfaceOfRevolution(transform, boundVertices, boundIndices, profile3d, circleSegments=16) {
     
     //console.table(vertices);
 
@@ -1032,8 +1030,8 @@ static buildSurfaceOfRevolution(
         if (acc > endDeg) endDeg = acc;
     }
 
-   
-    
+
+
    return GeometryUtils.buildSurfaceOfRevolution(
       transform
       ,boundVertices
@@ -1064,75 +1062,68 @@ static buildSurfaceOfRevolution(
     const radStep = (endRad - startRad) / (circleSegments - 1);
     const zStep = (maxZ - minZ) / (circleSegments - 1);
 
-    const rings = [];
-    const p = new THREE.Vector3();
-    for (let r = 0; r < circleSegments; r++) {
-      const angle = startRad + r * radStep;
-      const sinA = Math.sin(angle);
-      const cosA = Math.cos(angle);
+  // --- 1. Build rings with ONLY 2 height samples (minZ, maxZ) ---
+  const rings = []; // rings[r][j], j = 0(minZ), 1(maxZ)
+  for (let r = 0; r < circleSegments; r++) {
+    const angle = startRad + r * radStep;
+    const sinA = Math.sin(angle);
+    const cosA = Math.cos(angle);
 
-      const ring = [];
-      for (let j = 0; j < circleSegments; j++) {
-        const z = minZ + j * zStep;
-        p.set(0,0,0);
-        p.addScaledVector(xDir, sinA * radius)
-          .addScaledVector(yDir, cosA * radius)
-          .addScaledVector(zDir, z)
-          .add(center);
-        ring.push([p.x,p.y,p.z]);
-      }
-      rings.push(ring);
+    const ring = [];
+
+    // j = 0 -> minZ
+    {
+      const p0 = new THREE.Vector3()
+        .addScaledVector(xDir, sinA * radius)
+        .addScaledVector(yDir, cosA * radius)
+        .addScaledVector(zDir, minZ)
+        .add(center);
+      ring.push(p0);
     }
 
-    // triangulate between rings
-    const points = [];
-    const indices = [];
-    const triangles = [];
-    let indice_offset = 0;
-    for (let r = 0; r < circleSegments - 1; r++) {
-      const r1 = r + 1;
-      for (let j = 0; j < circleSegments - 1; j++) {
-
-        // vertices
-        const vertices = [
-          rings[r][j]      // 00
-          ,rings[r][j + 1] // 01
-          ,rings[r1][j]    // 10
-          ,rings[r1][j + 1]// 11
-        ];
-
-        for(let p=0; p < vertices.length; p++){
-          points.push(new THREE.Vector3(vertices[p][0],vertices[p][1],vertices[p][2]));
-        }
-
-        // 1st triangle
-        triangles.push([
-           indice_offset  + 0
-          ,indice_offset  + 1
-          ,indice_offset  + 2
-        ]);
-
-          // 2nd triangle
-        triangles.push([
-          indice_offset  + 2
-          ,indice_offset  + 1
-          ,indice_offset  + 3
-        ]);
-
-        // indices
-        // next vertex indice
-        indice_offset+=vertices.length;
-
-      }
+    // j = 1 -> maxZ
+    {
+      const p1 = new THREE.Vector3()
+        .addScaledVector(xDir, sinA * radius)
+        .addScaledVector(yDir, cosA * radius)
+        .addScaledVector(zDir, maxZ)
+        .add(center);
+      ring.push(p1);
     }
 
-    return [points,triangles];
+    rings.push(ring);
+  }
+
+  // --- 2. Build per-angular-segment surface vertices ---
+  const faces = [];
+
+  for (let r = 0; r < circleSegments - 1; r++) {
+    const r1 = r + 1;
+
+    // This segment is ONE vertical quad strip
+    const face = [];
+
+    const p00 = rings[r][0];   // minZ, angle r
+    const p01 = rings[r][1];   // maxZ, angle r
+    const p10 = rings[r1][0];  // minZ, angle r+1
+    const p11 = rings[r1][1];  // maxZ, angle r+1
+
+    // Store in consistent order (quad)
+    face.push(p00.clone());
+    face.push(p01.clone());
+    face.push(p11.clone());
+    face.push(p10.clone());
+
+    faces.push(face);
+  }
+
+  return faces;
 
   }
 
 
   /* triangulate a 3D cylindrical face */
-  static triangulateCylindricalFace(vertices, holes, transform,radius,circleSegments)
+  static triangulateCylindricalFace(vertices, holes, transform,radius,circleSegments=16)
   {
     const xDir = GeometryUtils._vector1;
     const yDir = GeometryUtils._vector2;
@@ -1143,7 +1134,7 @@ static buildSurfaceOfRevolution(
 
     // We only need directions, not scale
     xDir.normalize();   // cylinder axis (local Z)
-    yDir.normalize();   // reference direction (θ = 0)
+    yDir.normalize();   // reference direction (angle = 0)
     zDir.normalize();   // perpendicular direction
 
     center.setFromMatrixPosition(transform);
@@ -1162,14 +1153,13 @@ static buildSurfaceOfRevolution(
       const dy = rel_tmp.dot(yDir);
 
       const angle = Math.atan2(dx, dy) * 180 / Math.PI;
-
       angleVec.push(angle);
 
       if (dz < minZ) minZ = dz;
       if (dz > maxZ) maxZ = dz;
     }
 
-    // unwrap angles to avoid jumps >180°
+    // unwrap angles to avoid jumps >180º
     const unwrapped = [angleVec[0]];
     for (let i = 1; i < angleVec.length; i++) {
       let diff = angleVec[i] - angleVec[i - 1];

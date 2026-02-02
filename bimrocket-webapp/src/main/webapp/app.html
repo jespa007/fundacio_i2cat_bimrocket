@@ -50,14 +50,17 @@
         "imports": {
           "js/": "./js/",
           "three": "./js/lib/three.module.js",
-          "earcut": "./js/lib/earcut.js"
-          
+          "manifold": "./js/lib/manifold.js"
         }
 			}
 		</script>
 
     <script type="module">
       import { Application } from "./js/ui/Application.js";
+      import { initApi } from "./js/core/Manifold.js";
+
+      // Load manifold api
+      await initApi();
 
       window.bimrocket = new Application();
     </script>

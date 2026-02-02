@@ -62,7 +62,7 @@ class IFCLoader extends THREE.Loader
     ],
     retainIfcFile: this.RETAIN_IFC_FILE_YES,
     voidingMode : this.VOIDING_MODE_ALL,
-    faceSetOptimizationRange : [0, 100000] // range of number of faces [min, max] to optimize the geometry
+    faceSetOptimizationRange : [0, 1000] // range of number of faces [min, max] to optimize the geometry
   };
 
   constructor(manager)
@@ -2342,18 +2342,15 @@ class IfcTrimmedCurveHelper extends IfcCurveHelper
       const trim1 = curve.Trim1[0];
       const trim2 = curve.Trim2[0];
       const sense = curve.SenseAgreement === true;
-      /*let isCartesionPoint = trim1 instanceof schema.IfcCartesianPoint
-                           && trim2 instanceof schema.IfcCartesianPoint;*/
 
       if (basisCurve instanceof schema.IfcConic)
       {
-        let startAngle = (trim1 instanceof schema.IfcParameterValue) ?
+        const startAngle = (trim1 instanceof schema.IfcParameterValue) ?
           trim1.Value : trim1;
 
-        let endAngle = (trim2 instanceof schema.IfcParameterValue) ?
+        const endAngle = (trim2 instanceof schema.IfcParameterValue) ?
           trim2.Value : trim2;
 
-        
         this.points =
           basisHelper.getTrimmedPoints(startAngle, endAngle, sense);
       }
@@ -2372,7 +2369,7 @@ class IfcTrimmedCurveHelper extends IfcCurveHelper
       }
       else
       {
-        //console.warn("unsupported trimmed curve segment", curve);
+        console.warn("IfcTrimmedCurveHelper : unsupported trimmed curve segment", curve);
       }
 
       /*if(isCartesionPoint === true){
@@ -2541,8 +2538,7 @@ class IfcCircleHelper extends IfcConicHelper
           && trim_end instanceof THREE.Vector3
         ){
 
-          // invert sense
-          //sense = !sense;
+          // Fixme : this block of code is repeated as same as IfcEllipseHelper.getTrimmedPoints  (move in a function to reuse)
 
           const vecX = new THREE.Vector3();
           const vecY = new THREE.Vector3();
@@ -2656,12 +2652,66 @@ class IfcEllipseHelper extends IfcConicHelper
     let points = [];
     const ellipse = this.entity;
     const loader = this.loader;
+
+    const schema = ellipse.constructor.schema;
+
     const matrix = this.helper(ellipse.Position).getMatrix();
+    const radius = ellipse.Radius;
+
+    let startAngle;
+    let endAngle;
+
+     const isCartesianPoint = param1 instanceof schema.IfcCartesianPoint
+     && param2 instanceof schema.IfcCartesianPoint;
+
+     if(isCartesianPoint === true){
+
+        const trim_start = this.helper(param1).getPoint();
+        const trim_end = this.helper(param2).getPoint();
+
+        if(  trim_start instanceof THREE.Vector3
+          && trim_end instanceof THREE.Vector3
+        ){
+
+          // Fixme : this block of code is repeated as same as IfcCircleHelper.getTrimmedPoints (move in a function to reuse)
+
+          const vecX = new THREE.Vector3();
+          const vecY = new THREE.Vector3();
+          const vecZ = new THREE.Vector3();
+          const position = new THREE.Vector3();
+
+          matrix.extractBasis(vecX,vecY,vecZ);
+          position.setFromMatrixPosition(matrix);
+
+          const v1 = trim_start.clone().sub(position);
+          const v2 = trim_end.clone().sub(position);
+
+          const dxS = vecX.x * v1.x + vecX.y * v1.y + vecX.z * v1.z;
+          const dyS = vecY.x * v1.x + vecY.y * v1.y + vecY.z * v1.z;
+
+          const dxE = vecX.x * v2.x + vecX.y * v2.y + vecX.z * v2.z;
+          const dyE = vecY.x * v2.x + vecY.y * v2.y + vecY.z * v2.z;
+
+          startAngle = (new THREE.Vector2(dxS,dyS)).angle();//-Math.PI+Math.PI/4;
+          endAngle = (new THREE.Vector2(dxE,dyE)).angle();//-Math.PI-Math.PI/4;  
+
+          //while(startAngle<0){startAngle+=2*Math.PI};
+          //while(endAngle<0){endAngle+=2*Math.PI};
+
+          //console.log(`start : ${startAngle} end : ${endAngle}`);
+        }else{
+           console.error("IfcEllipseHelper.getTrimmedPoints : Angle cartesian point dimension not implemented")
+        }    
+
+    }else{
+      startAngle = THREE.MathUtils.degToRad(param1);
+      endAngle = THREE.MathUtils.degToRad(param2);
+    }
+
+//    const matrix = this.helper(ellipse.Position).getMatrix();
     const semiAxis1 = ellipse.SemiAxis1;
     const semiAxis2 = ellipse.SemiAxis2;
     const maxAxis = Math.max(semiAxis1, semiAxis2);
-    const startAngle = THREE.MathUtils.degToRad(param1);
-    const endAngle = THREE.MathUtils.degToRad(param2);
     const segments = loader.getCircleSegments(maxAxis);
 
     const addPoint = angle =>
@@ -2739,11 +2789,16 @@ class IfcBSplineCurveWithKnotsHelper extends IfcCurveHelper
         return point;
       }   
       
+      const p = bspline.Degree;
+      const m = U.length - 1;
       const dtds = 1.0/segments;
       let t=0;
+      const uMin = U[p];
+      const uMax = U[m - p];
      
       for (let i = 0; i < segments; i++) {
-          this.points.push(evaluateBSpline(t, bspline.Degree, controlPoints, U));
+          const u = uMin + (uMax - uMin) * t;
+          this.points.push(evaluateBSpline(u, bspline.Degree, controlPoints, U));
           t += dtds;
       }
       return this.points;   
@@ -2824,7 +2879,18 @@ class IfcFaceHelper extends IfcHelper
       let loop = bound.Bound; // IfcLoop:
 
       // (IfcPolyLoop, IfcEdgeLoop, IfcVertexLoop)
-      let [boundVertices,boundIndices] =this.helper(loop).getPoints();
+      let result =this.helper(loop).getPoints();
+      let boundIndices = null;
+      let boundVertices = null;
+
+      if (Array.isArray(result[0])) {
+        // EdgeLoopHelper case: [points, bounds]
+        [boundVertices, boundIndices] = result;
+      } else {
+        // PolyLoopHelper case: just points
+        boundVertices = result;
+        boundIndices = null;
+      }
 
       let loopVertices = GeometryUtils.cloneRing(boundVertices);
 
@@ -2833,12 +2899,12 @@ class IfcFaceHelper extends IfcHelper
       {
         // reverse loop sense
         loopVertices = loopVertices.slice().reverse();
-        boundIndices = boundIndices.slice().reverse();
+        if(boundIndices) boundIndices = boundIndices.slice().reverse();
       }
       if (bound instanceof schema.IfcFaceOuterBound)
       {
         faceVertices = loopVertices;
-        faceBoundIndices = boundIndices;
+        if(boundIndices) faceBoundIndices = boundIndices;
       }
       else
       {
@@ -2849,26 +2915,17 @@ class IfcFaceHelper extends IfcHelper
     if (faceVertices && faceVertices.length >= 3)
     {
       if(face.FaceSurface instanceof schema.IfcCylindricalSurface){
-         const [points,triangles] = GeometryUtils.triangulateCylindricalFace(
+         const faces = GeometryUtils.triangulateCylindricalFace(
             faceVertices
             ,[] // no holes by now
             ,this.helper(face.FaceSurface.Position).getMatrix()
             ,face.FaceSurface.Radius
-            ,this.loader.getCircleSegments(face.FaceSurface.Radius)
+            //,16 //this.loader.getCircleSegments(face.FaceSurface.Radius)
          );
 
         // create faces 
-        for(let triangle of triangles){
-          let subFaceVertices=[]
-
-          for(let i = 0; i < triangle.length; i++ ){
-            subFaceVertices.push(
-             points[triangle[i]]
-            );
-
-          }
-          
-          solidGeometry.addFace(...subFaceVertices);
+        for(let points of faces){
+          solidGeometry.addFace(...points);
         }
       }else if(face.FaceSurface instanceof schema.IfcSurfaceOfRevolution){
         let profile3d = this.helper(face.FaceSurface.SweptCurve.Curve).getPoints();
@@ -2882,30 +2939,16 @@ class IfcFaceHelper extends IfcHelper
           faceBoundIndices.reverse();
         }*/
 
-        const [points,triangles] = GeometryUtils.triangulateSurfaceOfRevolution(
+        const faces = GeometryUtils.triangulateSurfaceOfRevolution(
             this.helper(face.FaceSurface.AxisPosition).getMatrix()
            ,faceVertices
            ,faceBoundIndices
            ,profile3d
         )
 
-        const  localBoundVertices = [];
-        window.debugFillVertices = [...points];
-        window.debugLocalBoundVertices = [...localBoundVertices];
-        window.debugFillIndices = [...triangles.flat()];
-
         // create faces 
-        for(let triangle of triangles){
-          let subFaceVertices=[]
-
-          for(let i = 0; i < triangle.length; i++ ){
-            subFaceVertices.push(
-             points[triangle[i]]
-            );
-
-          }
-          
-          solidGeometry.addFace(...subFaceVertices);
+        for(let points of faces){
+          solidGeometry.addFace(...points);
         }
 
       }else{
@@ -2919,8 +2962,6 @@ class IfcFaceHelper extends IfcHelper
           }
         }
       }
-
-
     }
   }
 }
@@ -3096,15 +3137,10 @@ class IfcEdgeCurveHelper extends IfcEdgeHelper
       const schema = edge.constructor.schema;
 
       const edgeGeometry = edge.EdgeGeometry;
-      const edgePoints = super.getPoints();
-            
-      if(edgeGeometry.BasisCurve instanceof schema.IfcLine){
-        this.points = edgePoints;
-      }else{
-        const geometryHelper = this.helper(edgeGeometry);
-        let geomPoints = geometryHelper.getPoints();
-        this.points = geomPoints;
-      }
+
+      const geometryHelper = this.helper(edgeGeometry);
+      let geomPoints = geometryHelper.getPoints();
+      this.points = geomPoints;
 
     }
     return this.points;
@@ -4215,7 +4251,7 @@ class IfcPropertySetHelper extends IfcHelper
       const loader = this.loader;
       const schema = pset.constructor.schema;
 
-      this.properties =  {
+      this.properties = {
         ifcClassName : "IfcPropertySet",
         GlobalId : pset.GlobalId
       };
