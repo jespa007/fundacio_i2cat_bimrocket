@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import earcut from "earcut";
 
 class GeometryUtils
 {
@@ -847,7 +848,7 @@ static buildSurfaceOfRevolution(
             index += h.length;
         }
 
-        return THREE.earcut(coords, holeIndices);
+        return earcut(coords, holeIndices);
     };
 
     const uvToXYZ = (P, Auv, Buv, Cuv, Axyz, Bxyz, Cxyz) => {

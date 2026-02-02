@@ -29,14 +29,14 @@ class WFSController extends Controller
     this.username = "username";
     this.password = "password";
     this.layer = "layer";
-    this.format = "GeoJSON";
+    this.format = "GeoJSON"; // or GML
+    this.outputFormat = "";
     this.bbox = "";
     this.cqlFilter = "";
     this.count = 0;
     this.srsName = "";
+    this.version = "";
     this.representationMode = WFSController.ADD_OBJECT_REPR_MODE;
-    this.mergeGeometries = false;
-    this.origin = new THREE.Vector3(420878, 4582247, 0);
 
     this._onLoad = this.onLoad.bind(this);
     this._onProgress = this.onProgress.bind(this);
@@ -76,6 +76,7 @@ class WFSController extends Controller
     {
       featureGroup = new THREE.Group();
       featureGroup.name = this.layer;
+      featureGroup.position.copy(group.position);
 
       const features = [...group.children]; // explode group
       group.clear();
@@ -110,23 +111,10 @@ class WFSController extends Controller
       featureGroup = group;
     }
 
-    if (this.mergeGeometries)
-    {
-      const mergeGroup = new THREE.Group();
-      mergeGroup.builder = new GeometryMerger();
-      mergeGroup.add(featureGroup);
-      ObjectUtils.setSelectionEnabled(featureGroup, true);
-      featureGroup = mergeGroup;
-      featureGroup.updateMatrix();
-    }
-
     this.object.add(featureGroup);
     featureGroup.name = WFSController.FEATURES_NAME;
     featureGroup.updateMatrix();
-
-    Formula.updateTree(featureGroup);
-
-    ObjectBuilder.build(featureGroup);
+    featureGroup.updateMatrixWorld(true);
 
     if (featureGroup.userData.export === undefined)
     {
@@ -134,6 +122,10 @@ class WFSController extends Controller
       featureGroup.userData.export.export = false;
     }
     featureGroup.userData.export.exportChildren = false;
+
+    Formula.updateTree(featureGroup);
+    ObjectBuilder.build(featureGroup);
+    ObjectUtils.reduceCoordinates(this.application.baseObject);
 
     this.application.notifyObjectsChanged(this.object, this, "structureChanged");
     console.info("Feature " + this.layer + " loaded (" + featureCount + ").");
@@ -147,8 +139,10 @@ class WFSController extends Controller
 
     if (featureRepr instanceof THREE.Group)
     {
-      // clone builder & formulas for Groups
+      // make children visible
+      featureRepr.children.forEach(child => child.visible = true);
 
+      // clone builder & formulas for Groups
       featureRepr.builder =
         representation.builder ? representation.builder.clone() : null;
 
@@ -188,17 +182,6 @@ class WFSController extends Controller
       url = document.location.protocol + "//" + document.location.host + url;
     }
 
-    let layer = this.layer;
-    let format = this.format || "GeoJSON";
-    let loader;
-    if (format === "GML")
-    {
-      loader = new GMLLoader();
-    }
-    else
-    {
-      loader = new GeoJSONLoader();
-    }
     if (url.indexOf("?") === -1)
     {
       url += "?";
@@ -207,8 +190,59 @@ class WFSController extends Controller
     {
       url += "&";
     }
-    url += "service=wfs&version=2.0.0&request=GetFeature&outputFormat=" +
-      loader.mimeType + "&typeName=" + layer;
+
+    let layer = this.layer;
+    let format = this.format || "GeoJSON";
+    let loader;
+
+    if (format.startsWith("GML"))
+    {
+      loader = new GMLLoader();
+    }
+    else
+    {
+      loader = new GeoJSONLoader();
+    }
+
+    let version = this.version;
+    if (!version)
+    {
+      // When no WFS version is specified, select it according to the format
+      if (format.startsWith("GML32"))
+      {
+        version = "2.0.0";
+      }
+      else
+      {
+        version = "1.1.0";
+      }
+    }
+
+    let outputFormat = this.outputFormat;
+    if (!outputFormat)
+    {
+      // when no outputFormat is specified, select it according to the format
+      if (format.startsWith("GML2"))
+      {
+        outputFormat = "gml2";
+      }
+      else if (format.startsWith("GML32"))
+      {
+        outputFormat = "gml32";
+      }
+      else if (format.startsWith("GML"))
+      {
+        outputFormat = "gml3";
+      }
+      else // GeoJSON
+      {
+        outputFormat = "application/json";
+      }
+    }
+
+    url += "service=wfs&version=" + version +
+         "&request=GetFeature&outputFormat=" + outputFormat +
+         "&typeName=" + layer;
     const count = this.count;
     if (count > 0)
     {
@@ -229,15 +263,13 @@ class WFSController extends Controller
     {
       url += "&srsName=" + srsName;
     }
-    loader.options = {
+    loader.options =
+    {
       name: layer || "wfs",
       username: this.username,
-      password: this.password,
-      origin: this.origin,
-      representation: this.object.getObjectByName("representation")
+      password: this.password
     };
 
-    console.info("Loading feature " + this.layer + "...");
     loader.load(url, this._onLoad, this._onProgress, this._onError);
   }
 

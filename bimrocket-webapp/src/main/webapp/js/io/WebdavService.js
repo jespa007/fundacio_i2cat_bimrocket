@@ -18,17 +18,17 @@ class WebdavService extends FileService
     "EVERYONE": { type: "all" },
     "AUTHENTICATED": { type: "authenticated" }
   };
-  
+
   static xmlTagToPrivilege =
   {
     "read": "READ",
     "write": "WRITE",
     "read-acl": "READ_ACL",
-    "write-acl": "WRITE_ACL"    
+    "write-acl": "WRITE_ACL"
   };
-  
+
   static privilegeToXmlTag = {};
- 
+
   static
   {
     for (let tag in this.xmlTagToPrivilege)
@@ -47,8 +47,6 @@ class WebdavService extends FileService
   {
     const parameters = super.getParameters();
     parameters.useProxy = this.useProxy;
-    parameters.proxyUsername = this.proxyUsername;
-    parameters.proxyPassword = this.proxyPassword;
     return parameters;
   }
 
@@ -56,8 +54,6 @@ class WebdavService extends FileService
   {
     super.setParameters(parameters);
     this.useProxy = parameters.useProxy || false;
-    this.proxyUsername = parameters.proxyUsername || null;
-    this.proxyPassword = parameters.proxyPassword || null;
   }
 
   open(path, readyCallback, progressCallback)
@@ -308,6 +304,63 @@ class WebdavService extends FileService
     request.send();
   }
 
+  move(sourcePath, destinationPath, readyCallback, progressCallback)
+  {
+    const OK = Result.OK;
+    const ERROR = Result.ERROR;
+
+    const url = this.getUrl(sourcePath);
+    const request = new XMLHttpRequest();
+    request.onerror = error =>
+    {
+      readyCallback(new Result(ERROR, "Connection error"));
+    };
+    request.onload = () =>
+    {
+      if (request.status === 200 || request.status === 201)
+      {
+        readyCallback(new Result(OK));
+      }
+      else
+      {
+        readyCallback(this.createError(
+          "Move operation failed", request.status));
+      }
+    };
+    this.openRequest("MOVE", url, request);
+    let destination = this.url + encodeURIComponent(destinationPath);
+    request.setRequestHeader("Destination", destination);
+    request.send();
+  }
+
+  copy(sourcePath, destinationPath, readyCallback, progressCallback)
+  {
+    const OK = Result.OK;
+    const ERROR = Result.ERROR;
+
+    const url = this.getUrl(sourcePath);
+    const request = new XMLHttpRequest();
+    request.onerror = error =>
+    {
+      readyCallback(new Result(ERROR, "Connection error"));
+    };
+    request.onload = () =>
+    {
+      if (request.status === 200 || request.status === 201)
+      {
+        readyCallback(new Result(OK));
+      }
+      else
+      {
+        readyCallback(this.createError(
+          "Copy operation failed", request.status));
+      }
+    };
+    this.openRequest("COPY", url, request);
+    request.setRequestHeader("Destination", this.url + destinationPath);
+    request.send();
+  }
+
   getACL(path, readyCallback)
   {
     const OK = Result.OK;
@@ -407,7 +460,6 @@ class WebdavService extends FileService
 
     if (this.useProxy)
     {
-      WebUtils.setBasicAuthorization(request, this.proxyUsername, this.proxyPassword);
       if (credentials.username && credentials.password)
       {
         WebUtils.setBasicAuthorization(request,
@@ -539,14 +591,14 @@ class WebdavService extends FileService
 
     return xml;
   }
-  
+
   mapXmlTagToPrivilege(privilegeTag)
   {
     const privilege = this.constructor.xmlTagToPrivilege[privilegeTag];
     if (!privilege) throw "Unsupported privilege " + privilegeTag;
     return privilege;
   }
-  
+
   mapPrivilegeToXmlTag(privilege)
   {
     const privilegeTag = this.constructor.privilegeToXmlTag[privilege];

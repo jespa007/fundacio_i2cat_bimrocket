@@ -21,7 +21,8 @@ class IFCFile
       description : [""],
       author : [""],
       organization : [""],
-      timeStamp : null
+      timeStamp : null,
+      schemas : [""]
     };
   }
 
@@ -157,6 +158,11 @@ class IFCFile
             add(relatedObject, "_IsDefinedBy", rel);
           }
         }
+      }
+      else if (rel instanceof schema.IfcRelSpaceBoundary)
+      {
+        add(rel.RelatedBuildingElement, "_ProvidesBoundaries", rel);
+        add(rel.RelatingSpace, "_BoundedBy", rel);
       }
     }
 

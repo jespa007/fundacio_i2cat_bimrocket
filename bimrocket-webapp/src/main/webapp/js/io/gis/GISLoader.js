@@ -17,7 +17,7 @@ class GISLoader extends THREE.Loader
     super(manager);
     this.options = {};
     this.mimeType = mimeType;
-    this.origin = new THREE.Vector3();
+    this._origin = null;
     /* default material for Cords and Profiles */
     this.lineMaterial = new THREE.LineBasicMaterial({ color: 0x0 });
     this.pointGeometry = null;
@@ -27,10 +27,6 @@ class GISLoader extends THREE.Loader
   load(url, onLoad, onProgress, onError)
   {
     const options = this.options;
-    if (options.origin)
-    {
-      this.origin.copy(options.origin);
-    }
 
     const request = new XMLHttpRequest();
     request.open("GET", url, true);
@@ -62,37 +58,34 @@ class GISLoader extends THREE.Loader
   {
   }
 
-  createObject(type, name, coordinates, properties, parent)
+  createObject(geomType, name, coordinates, properties, parent)
   {
     try
     {
-      if (type === "Point")
+      switch (geomType)
       {
-        this.createPoint(name, coordinates, properties, parent);
-      }
-      else if (type === "MultiPoint")
-      {
-        this.createMultiPoint(name, coordinates, properties, parent);
-      }
-      else if (type === "LineString")
-      {
-        this.createLineString(name, coordinates, properties, parent);
-      }
-      else if (type === "MultiLineString")
-      {
-        this.createMultiLineString(name, coordinates, properties, parent);
-      }
-      else if (type === "Polygon")
-      {
-        this.createPolygon(name, coordinates, properties, parent);
-      }
-      else if (type === "MultiPolygon")
-      {
-        this.createMultiPolygon(name, coordinates, properties, parent);
-      }
-      else
-      {
-        this.createNonVisibleObject(name, properties, parent);
+        case "Point":
+          this.createPoint(name, coordinates, properties, parent);
+          break;
+        case "LineString":
+          this.createLineString(name, coordinates, properties, parent);
+          break;
+        case "Polygon":
+          this.createPolygon(name, coordinates, properties, parent);
+          break;
+        case "MultiPoint":
+          this.createMultiPoint(name, coordinates, properties, parent);
+          break;
+        case "MultiLineString":
+        case "MultiCurve":
+          this.createMultiLineString(name, coordinates, properties, parent);
+          break;
+        case "MultiPolygon":
+        case "MultiSurface":
+          this.createMultiPolygon(name, coordinates, properties, parent);
+          break;
+        default:
+          this.createNonVisibleObject(name, properties, parent);
       }
     }
     catch (ex)
@@ -121,16 +114,18 @@ class GISLoader extends THREE.Loader
   {
     if (this.pointGeometry === null)
     {
-      const path = new THREE.Path();
+      const path = new THREE.Shape();
       const radius = 0.5 * this.pointSize;
 
       path.moveTo(-radius, 0);
-      path.lineTo(0, radius);
-      path.lineTo(radius, 0);
       path.lineTo(0, -radius);
+      path.lineTo(radius, 0);
+      path.lineTo(0, radius);
       path.closePath();
       this.pointGeometry = new ProfileGeometry(path);
     }
+
+    const origin = this.getOrigin(coordinates);
 
     let profile = new Profile(this.pointGeometry, this.lineMaterial);
     profile.name = "Point";
@@ -138,7 +133,7 @@ class GISLoader extends THREE.Loader
     profile.position.x = coordinates[0];
     profile.position.y = coordinates[1];
     profile.position.z = coordinates.length === 3 ? coordinates[2] : 0;
-    profile.position.sub(this.origin);
+    profile.position.sub(origin);
 
     this.setObjectProperties(profile, name, properties);
     parent.add(profile);
@@ -162,6 +157,8 @@ class GISLoader extends THREE.Loader
 
   createLineString(name, coordinates, properties, parent)
   {
+    const origin = this.getOrigin(coordinates[0]);
+
     let vertices = [];
     for (let i = 0; i < coordinates.length; i++)
     {
@@ -170,7 +167,7 @@ class GISLoader extends THREE.Loader
         point[0],
         point[1],
         point.length === 3 ? point[2] : 0);
-      v.sub(this.origin);
+      v.sub(origin);
       vertices.push(v);
     }
 
@@ -201,12 +198,14 @@ class GISLoader extends THREE.Loader
   {
     let pts = [];
 
+    const origin = this.getOrigin(coordinates[0][0]);
+
     let outerRing = coordinates[0];
     for (let p = 0; p < outerRing.length - 1; p++)
     {
       let point = outerRing[p];
       let v = new THREE.Vector2(point[0], point[1]);
-      v.sub(this.origin);
+      v.sub(origin);
       pts.push(v);
     }
 
@@ -223,7 +222,7 @@ class GISLoader extends THREE.Loader
       {
         let point = innerRing[p];
         let v = new THREE.Vector2(point[0], point[1]);
-        v.sub(this.origin);
+        v.sub(origin);
         pts.push(v);
       }
       let hole = new THREE.Shape(pts);
@@ -252,6 +251,25 @@ class GISLoader extends THREE.Loader
       this.createPolygon(name + "_" + i, polygonCoords, null, group);
     }
     parent.add(group);
+  }
+
+  getOrigin(coordinates = null)
+  {
+    if (this._origin === null)
+    {
+      if (coordinates)
+      {
+        this._origin = new THREE.Vector3(
+          coordinates[0],
+          coordinates[1],
+          coordinates.length === 3 ? coordinates[2] : 0);
+      }
+      else
+      {
+        this._origin = new THREE.Vector3();
+      }
+    }
+    return this._origin;
   }
 }
 

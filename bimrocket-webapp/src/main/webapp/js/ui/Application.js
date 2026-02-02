@@ -183,7 +183,7 @@ class Application
         preserveDrawingBuffer : true
       });
       renderer.shadowMap.enabled = setup.shadowsEnabled;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       renderer.setClearColor(0x000000, 0);
     }
     else
@@ -1139,11 +1139,6 @@ class Application
     if (save)
     {
       this.saveServices(group);
-      const alias = service.credentialsAlias;
-      if (alias)
-      {
-        CredentialsManager.saveCredentials(alias);
-      }
     }
   }
 
@@ -2052,7 +2047,29 @@ class Application
       onError : error =>
       {
         application.progressBar.visible = false;
-        dialog.show();
+
+        const stringifiedError = String(error);
+
+        if (stringifiedError.includes("404"))
+        {
+          return MessageDialog
+            .create("ERROR", "Model not found")
+            .setClassName("error")
+            .setI18N(this.i18n)
+            .show();
+        }
+        else if (stringifiedError.includes("401") || stringifiedError.includes("403"))
+        {
+          dialog.show();
+        }
+        else
+        {
+          return MessageDialog
+            .create("ERROR", stringifiedError)
+            .setClassName("error")
+            .setI18N(this.i18n)
+            .show();
+        }
       },
       options : { units : application.setup.units }
     };
